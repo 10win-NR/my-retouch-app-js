@@ -84,7 +84,7 @@ imageInput.addEventListener('change', function(e) {
 });
 
 // ==========================================
-// 2. お絵描き機能（ルーペの画面外はみ出し＆座標修正対応）
+// 2. お絵描き機能
 // ==========================================
 let isDrawing = false;
 let lastX = 0; let lastY = 0; 
@@ -106,7 +106,6 @@ function getCoordinates(e) {
     const scaleX = drawCanvas.width / rect.width;
     const scaleY = drawCanvas.height / rect.height;
 
-    // 🌟 一部の環境で発生していた座標ズレを修正 (rect.left/rect.top の反映)
     return {
         x: (clientX - rect.left) * scaleX, 
         y: (clientY - rect.top) * scaleY,  
@@ -171,18 +170,17 @@ drawCanvas.addEventListener('touchstart', startDrawing, { passive: false }); dra
 drawCanvas.addEventListener('touchend', stopDrawing); drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js による美肌化と合成処理 (超・ナチュラルお化粧レイヤー合成版)
+// 3. OpenCV.js ＋ ふんわりフィルター合成 (完成形)
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) { alert('⏳ 準備中です。'); return; }
 
-    processBtn.textContent = "⏳ お化粧中...";
+    processBtn.textContent = "⏳ ふんわり美肌に加工中...";
     processBtn.disabled = true;
 
     setTimeout(function() {
         try {
-            // 計算用サイズ（質感を残すため、メモリ制限限界まで拡大）
-            const MAX_SIZE = 2500; 
+            const MAX_SIZE = 2000; 
             let scale = 1.0;
             if (currentImage.width > MAX_SIZE || currentImage.height > MAX_SIZE) {
                 scale = MAX_SIZE / Math.max(currentImage.width, currentImage.height);
@@ -200,12 +198,11 @@ processBtn.addEventListener('click', function() {
             let srcRgb = new cv.Mat();
             cv.cvtColor(src, srcRgb, cv.COLOR_RGBA2RGB);
 
-            // 🚨 強すぎるメディアンを廃止し、バイラテラルを超弱設定に固定！
+            // 適度な滑らかさのバイラテラルフィルタ
             let smoothedMat = new cv.Mat();
-            // 毛穴レベルの質感が残る超弱設定
-            let d = 3; 
-            let sigmaColor = 25;
-            let sigmaSpace = 25;
+            let d = 5; 
+            let sigmaColor = 40;
+            let sigmaSpace = 40;
             cv.bilateralFilter(srcRgb, smoothedMat, d, sigmaColor, sigmaSpace);
 
             let channels = new cv.MatVector();
@@ -227,23 +224,33 @@ processBtn.addEventListener('click', function() {
 
             cv.imshow(smallCanvas, smoothedTempRgba);
 
+            // --- 🌟 ここからがプロの魔法の合成 ---
             let compositeCanvas = document.createElement('canvas');
             compositeCanvas.width = imageCanvas.width; compositeCanvas.height = imageCanvas.height;
             let compositeCtx = compositeCanvas.getContext('2d');
             
+            // 魔法1：境界線のギザギザを消す「フェザリング（ぼかし）」
+            compositeCtx.filter = 'blur(20px)'; // なぞり跡のフチを柔らかくする
             compositeCtx.drawImage(drawCanvas, 0, 0); 
+            compositeCtx.filter = 'none'; // リセット
+            
             compositeCtx.globalCompositeOperation = 'source-in'; 
-            compositeCtx.drawImage(smallCanvas, 0, 0, imageCanvas.width, imageCanvas.height); 
 
-            // 🌟 結果出力：不透明度ブレンドの魔法
+            // 魔法2：低コントラスト＆高ハイライトの「ふんわりフィルター」をかける！
+            // コントラストを下げ、明るさと彩度を上げて、透明感のある肌色を作る
+            compositeCtx.filter = 'contrast(85%) brightness(115%) saturate(105%)';
+            compositeCtx.drawImage(smallCanvas, 0, 0, imageCanvas.width, imageCanvas.height); 
+            compositeCtx.filter = 'none'; // リセット
+
+            // --- 🌟 結果出力 ---
             let factor = parseInt(smoothFactor.value);
-            let alpha = factor / 100; // スライダーが強さではなく透明度になる
+            let alpha = factor / 100;
 
             resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
-            // 1. まず元の高画質（毛穴もヒゲもそのまま）を敷く
+            // 元の質感を敷く
             resultCtx.drawImage(currentImage, 0, 0); 
             
-            // 2. その上に、超弱美肌画像を「半透明」で重ねる
+            // ふんわりフィルター済みの肌を半透明で重ねる
             resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.globalAlpha = alpha; 
             resultCtx.drawImage(compositeCanvas, 0, 0); 
@@ -265,7 +272,7 @@ processBtn.addEventListener('click', function() {
 });
 
 // ==========================================
-// 4. 画像の保存機能（🌟 スマホで落ちない高品質JPG＆共有機能に変更）
+// 4. 画像の保存・共有機能
 // ==========================================
 saveBtn.addEventListener('click', function() {
     if (!currentImage.src) { alert('まずは画像を読み込んでください！'); return; }
@@ -282,7 +289,6 @@ saveBtn.addEventListener('click', function() {
             }
         }
 
-        // 🌟 魔法：Androidでも確実に保存できるよう「共有機能（Web Share）」を使う
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: "image/jpeg" })] })) {
             const file = new File([blob], fileName, { type: "image/jpeg" });
             navigator.share({
@@ -293,7 +299,6 @@ saveBtn.addEventListener('click', function() {
             .then(() => console.log('共有成功'))
             .catch((error) => console.log('共有失敗', error));
         } else {
-            // 共有が使えない場合のフォールバック（以前のBlobダウンロード）
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -302,8 +307,6 @@ saveBtn.addEventListener('click', function() {
             a.click(); 
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            alert('ダウンロードを開始しました（共有が使えない環境です）。保存ダイアログが閉じない場合は、ブラウザのダウンロード履歴を確認してください。');
         }
-        
-    }, 'image/jpeg', 0.95); // 12MPでもスマホで扱える高品質JPG
+    }, 'image/jpeg', 0.95); 
 });
