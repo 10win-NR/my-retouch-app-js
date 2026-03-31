@@ -222,7 +222,7 @@ drawCanvas.addEventListener('touchend', stopDrawing);
 drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js による美肌化と合成処理
+// 3. OpenCV.js による美肌化と合成処理 (プロ版：コンシーラーロジック)
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) {
@@ -230,25 +230,57 @@ processBtn.addEventListener('click', function() {
         return;
     }
 
-    processBtn.textContent = "⏳ 処理中...";
+    processBtn.textContent = "⏳ お化粧中...";
     processBtn.disabled = true;
 
     setTimeout(function() {
         try {
             let src = cv.imread(imageCanvas); 
             let srcRgb = new cv.Mat();
-            let smoothedRgb = new cv.Mat();
+            let finalSmoothed = new cv.Mat();
 
+            // RGBA -> RGBへ変換
             cv.cvtColor(src, srcRgb, cv.COLOR_RGBA2RGB);
 
+            // スライダーの値（0-100）を取得
             let factor = parseInt(smoothFactor.value);
-            let d = 5 + (25 * factor / 100);
-            let sigma = 20 + (150 * factor / 100);
-            cv.bilateralFilter(srcRgb, smoothedRgb, d, sigma, sigma);
 
-            // --- 🌡️ 色温度調整 ---
+            // ---------------------------------------------------------
+            // 🌟 処理1： medianBlur (凹凸・ヒゲ消しコンシーラー)
+            // ---------------------------------------------------------
+            // ヒゲや肌荒れの凹凸を「周囲の中間色」で強引に埋める、強力なフィルタ。
+            // 補正強度に応じて、フィルタのサイズ（奇数）を動的に大きくする。
+            let medianMat = new cv.Mat();
+            
+            // スライダーの値を、3から19の奇数にマッピング
+            // 0 -> 3, 50 -> 11, 100 -> 19
+            let kMedian = Math.floor(factor / 100 * 8) * 2 + 3; 
+            
+            if (factor > 5) {
+                // 強度が低い時は、メディアンをかけずに画質を保つ
+                cv.medianBlur(srcRgb, medianMat, kMedian);
+            } else {
+                srcRgb.copyTo(medianMat);
+            }
+
+            // ---------------------------------------------------------
+            // 🌟 処理2：強力な bilateralFilter (滑らか肌仕上げ)
+            // ---------------------------------------------------------
+            // メディアンで平らにした肌を、さらに均一で滑らかな質感にする。
+            // 以前よりもパラメータを極端に強く設定（sigmaSpace, sigmaColorを大きく）。
+            
+            // 空間のシグマ (どれくらい遠くの画素まで参考にするか：陶器肌感)
+            let sigmaSpace = 15 + (135 * factor / 100); // 15〜150
+            // 色のシグマ (どれくらい違う色まで混ぜるか：色ムラ消し)
+            let sigmaColor = 20 + (180 * factor / 100); // 20〜200
+            
+            cv.bilateralFilter(medianMat, finalSmoothed, -1, sigmaColor, sigmaSpace);
+
+            // ---------------------------------------------------------
+            // 🌡️ 色温度調整
+            // ---------------------------------------------------------
             let channels = new cv.MatVector();
-            cv.split(smoothedRgb, channels);
+            cv.split(finalSmoothed, channels);
             let r = channels.get(0); 
             let b = channels.get(2); 
             let temp = parseInt(colorTemp.value);
@@ -270,11 +302,13 @@ processBtn.addEventListener('click', function() {
             let smoothedTempRgba = new cv.Mat();
             cv.cvtColor(smoothedTempRgb, smoothedTempRgba, cv.COLOR_RGB2RGBA);
 
+            // 一時的なキャンバスに書き出す
             let tempCanvas = document.createElement('canvas');
             tempCanvas.width = imageCanvas.width;
             tempCanvas.height = imageCanvas.height;
             cv.imshow(tempCanvas, smoothedTempRgba);
 
+            // マスクによる合成（なぞった部分だけを切り抜く）
             let compositeCanvas = document.createElement('canvas');
             compositeCanvas.width = imageCanvas.width;
             compositeCanvas.height = imageCanvas.height;
@@ -284,12 +318,14 @@ processBtn.addEventListener('click', function() {
             compositeCtx.globalCompositeOperation = 'source-in'; 
             compositeCtx.drawImage(tempCanvas, 0, 0); 
 
+            // 結果プレビューエリアへの出力
             resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
             resultCtx.drawImage(currentImage, 0, 0); 
             resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.drawImage(compositeCanvas, 0, 0); 
 
-            src.delete(); srcRgb.delete(); smoothedRgb.delete(); 
+            // メモリの完全な解放
+            src.delete(); srcRgb.delete(); medianMat.delete(); finalSmoothed.delete();
             smoothedTempRgb.delete(); smoothedTempRgba.delete(); channels.delete(); b.delete(); r.delete();
 
             processBtn.textContent = "✨ なぞった部分を美肌にする ✨";
@@ -302,42 +338,4 @@ processBtn.addEventListener('click', function() {
             processBtn.disabled = false;
         }
     }, 100); 
-});
-
-// ==========================================
-// 4. 画像の保存機能（高画質対応）
-// ==========================================
-saveBtn.addEventListener('click', function() {
-    if (!currentImage.src) {
-        alert('まずは画像を読み込んでください！');
-        return;
-    }
-
-    resultCanvas.toBlob(function(blob) {
-        if (!blob) {
-            alert('画像の保存に失敗しました。');
-            return;
-        }
-
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-
-        let fileName = "retouched_image.png";
-        if (imageInput.files.length > 0) {
-            const originalName = imageInput.files[0].name;
-            const dotIndex = originalName.lastIndexOf('.');
-            if (dotIndex !== -1) {
-                fileName = originalName.substring(0, dotIndex) + '_retouched.png';
-            }
-        }
-
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click(); 
-
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-    }, 'image/png', 1.0);
 });
