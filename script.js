@@ -222,7 +222,7 @@ drawCanvas.addEventListener('touchend', stopDrawing);
 drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js による美肌化と合成処理 (プロ版：コンシーラーロジック)
+// 3. OpenCV.js による美肌化と合成処理 (超高速・陶器肌コンシーラー版)
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) {
@@ -233,54 +233,56 @@ processBtn.addEventListener('click', function() {
     processBtn.textContent = "⏳ お化粧中...";
     processBtn.disabled = true;
 
+    // 画面がフリーズしないよう、少し時間をおいてから重い処理をスタート
     setTimeout(function() {
         try {
             let src = cv.imread(imageCanvas); 
             let srcRgb = new cv.Mat();
-            let finalSmoothed = new cv.Mat();
-
-            // RGBA -> RGBへ変換
             cv.cvtColor(src, srcRgb, cv.COLOR_RGBA2RGB);
 
-            // スライダーの値（0-100）を取得
+            // ---------------------------------------------------------
+            // 🚀 高速化の魔法：計算用の一時縮小（ダウンサンプリング）
+            // ---------------------------------------------------------
+            // 12MPの画像をそのまま計算するとスマホがフリーズするので、計算用だけサイズを落とす
+            let maxProcessingSize = 800; // 長辺を最大800pxにして計算
+            let scale = maxProcessingSize / Math.max(srcRgb.cols, srcRgb.rows);
+            let isDownscaled = scale < 1.0;
+
+            let processMat = new cv.Mat();
+            if (isDownscaled) {
+                let smallSize = new cv.Size(Math.round(srcRgb.cols * scale), Math.round(srcRgb.rows * scale));
+                cv.resize(srcRgb, processMat, smallSize, 0, 0, cv.INTER_AREA);
+            } else {
+                srcRgb.copyTo(processMat);
+            }
+
             let factor = parseInt(smoothFactor.value);
 
             // ---------------------------------------------------------
-            // 🌟 処理1： medianBlur (凹凸・ヒゲ消しコンシーラー)
+            // 🌟 処理1： medianBlur (ヒゲ・肌荒れ消しコンシーラー)
             // ---------------------------------------------------------
-            // ヒゲや肌荒れの凹凸を「周囲の中間色」で強引に埋める、強力なフィルタ。
-            // 補正強度に応じて、フィルタのサイズ（奇数）を動的に大きくする。
             let medianMat = new cv.Mat();
-            
-            // スライダーの値を、3から19の奇数にマッピング
-            // 0 -> 3, 50 -> 11, 100 -> 19
-            let kMedian = Math.floor(factor / 100 * 8) * 2 + 3; 
-            
+            // 縮小画像にかけるので、カーネルサイズは小さめでも強烈に効く（かつ爆速）
+            let kMedian = Math.floor(factor / 100 * 4) * 2 + 3; // 3〜11の奇数
             if (factor > 5) {
-                // 強度が低い時は、メディアンをかけずに画質を保つ
-                cv.medianBlur(srcRgb, medianMat, kMedian);
+                cv.medianBlur(processMat, medianMat, kMedian);
             } else {
-                srcRgb.copyTo(medianMat);
+                processMat.copyTo(medianMat);
             }
 
             // ---------------------------------------------------------
-            // 🌟 処理2：強力な bilateralFilter (滑らか肌仕上げ)
+            // 🌟 処理2： bilateralFilter (滑らかな陶器肌仕上げ)
             // ---------------------------------------------------------
-            // メディアンで平らにした肌を、さらに均一で滑らかな質感にする。
-            // 以前よりもパラメータを極端に強く設定（sigmaSpace, sigmaColorを大きく）。
-            
-            // 空間のシグマ (どれくらい遠くの画素まで参考にするか：陶器肌感)
-            let sigmaSpace = 15 + (135 * factor / 100); // 15〜150
-            // 色のシグマ (どれくらい違う色まで混ぜるか：色ムラ消し)
-            let sigmaColor = 20 + (180 * factor / 100); // 20〜200
-            
-            cv.bilateralFilter(medianMat, finalSmoothed, -1, sigmaColor, sigmaSpace);
+            let smoothedMat = new cv.Mat();
+            let sigmaSpace = 10 + (40 * factor / 100);
+            let sigmaColor = 20 + (80 * factor / 100);
+            cv.bilateralFilter(medianMat, smoothedMat, -1, sigmaColor, sigmaSpace);
 
             // ---------------------------------------------------------
             // 🌡️ 色温度調整
             // ---------------------------------------------------------
             let channels = new cv.MatVector();
-            cv.split(finalSmoothed, channels);
+            cv.split(smoothedMat, channels);
             let r = channels.get(0); 
             let b = channels.get(2); 
             let temp = parseInt(colorTemp.value);
@@ -299,14 +301,27 @@ processBtn.addEventListener('click', function() {
             
             let smoothedTempRgb = new cv.Mat();
             cv.merge(channels, smoothedTempRgb);
-            let smoothedTempRgba = new cv.Mat();
-            cv.cvtColor(smoothedTempRgb, smoothedTempRgba, cv.COLOR_RGB2RGBA);
+
+            // ---------------------------------------------------------
+            // 🚀 魔法の仕上げ：元の12MPサイズに引き伸ばす（アップサンプリング）
+            // ---------------------------------------------------------
+            let finalLargeRgb = new cv.Mat();
+            if (isDownscaled) {
+                // 元の巨大な解像度に、滑らかに引き伸ばす
+                cv.resize(smoothedTempRgb, finalLargeRgb, srcRgb.size(), 0, 0, cv.INTER_CUBIC);
+            } else {
+                smoothedTempRgb.copyTo(finalLargeRgb);
+            }
+
+            // RGBAに戻す
+            let finalRgba = new cv.Mat();
+            cv.cvtColor(finalLargeRgb, finalRgba, cv.COLOR_RGB2RGBA);
 
             // 一時的なキャンバスに書き出す
             let tempCanvas = document.createElement('canvas');
             tempCanvas.width = imageCanvas.width;
             tempCanvas.height = imageCanvas.height;
-            cv.imshow(tempCanvas, smoothedTempRgba);
+            cv.imshow(tempCanvas, finalRgba);
 
             // マスクによる合成（なぞった部分だけを切り抜く）
             let compositeCanvas = document.createElement('canvas');
@@ -324,9 +339,10 @@ processBtn.addEventListener('click', function() {
             resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.drawImage(compositeCanvas, 0, 0); 
 
-            // メモリの完全な解放
-            src.delete(); srcRgb.delete(); medianMat.delete(); finalSmoothed.delete();
-            smoothedTempRgb.delete(); smoothedTempRgba.delete(); channels.delete(); b.delete(); r.delete();
+            // メモリの完全な解放（これをサボるとまたフリーズします！）
+            src.delete(); srcRgb.delete(); processMat.delete(); medianMat.delete(); 
+            smoothedMat.delete(); smoothedTempRgb.delete(); finalLargeRgb.delete(); finalRgba.delete();
+            channels.delete(); r.delete(); b.delete();
 
             processBtn.textContent = "✨ なぞった部分を美肌にする ✨";
             processBtn.disabled = false;
