@@ -140,7 +140,7 @@ function draw(e) {
         drawCtx.strokeStyle = 'rgba(0, 0, 0, 1)';
     } else {
         drawCtx.globalCompositeOperation = 'source-over';
-        drawCtx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; 
+        drawCtx.strokeStyle = 'rgba(255, 255, 255, 1.0)'; // マスクは完全な白に変更
     }
     drawCtx.stroke();
     lastX = pos.x; lastY = pos.y;
@@ -170,17 +170,17 @@ drawCanvas.addEventListener('touchstart', startDrawing, { passive: false }); dra
 drawCanvas.addEventListener('touchend', stopDrawing); drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js ＋ ふんわりフィルター合成 (完成形)
+// 3. 究極のプロ仕様：テクスチャ合成コンシーラー
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) { alert('⏳ 準備中です。'); return; }
 
-    processBtn.textContent = "⏳ ふんわり美肌に加工中...";
+    processBtn.textContent = "⏳ 最高級コンシーラーでお化粧中...";
     processBtn.disabled = true;
 
     setTimeout(function() {
         try {
-            const MAX_SIZE = 2000; 
+            const MAX_SIZE = 1200; 
             let scale = 1.0;
             if (currentImage.width > MAX_SIZE || currentImage.height > MAX_SIZE) {
                 scale = MAX_SIZE / Math.max(currentImage.width, currentImage.height);
@@ -198,12 +198,13 @@ processBtn.addEventListener('click', function() {
             let srcRgb = new cv.Mat();
             cv.cvtColor(src, srcRgb, cv.COLOR_RGBA2RGB);
 
-            // 適度な滑らかさのバイラテラルフィルタ
+            // 🌟 魔法1：強烈なメディアンフィルタでヒゲと肌荒れを「完全にすりつぶす」
+            let medianMat = new cv.Mat();
+            cv.medianBlur(srcRgb, medianMat, 7); // 7という強力な値で黒い点を消滅させる
+
+            // 🌟 魔法2：すりつぶした跡を滑らかなグラデーションに整える
             let smoothedMat = new cv.Mat();
-            let d = 5; 
-            let sigmaColor = 40;
-            let sigmaSpace = 40;
-            cv.bilateralFilter(srcRgb, smoothedMat, d, sigmaColor, sigmaSpace);
+            cv.bilateralFilter(medianMat, smoothedMat, 5, 40, 40);
 
             let channels = new cv.MatVector();
             cv.split(smoothedMat, channels);
@@ -224,39 +225,56 @@ processBtn.addEventListener('click', function() {
 
             cv.imshow(smallCanvas, smoothedTempRgba);
 
-            // --- 🌟 ここからがプロの魔法の合成 ---
             let compositeCanvas = document.createElement('canvas');
             compositeCanvas.width = imageCanvas.width; compositeCanvas.height = imageCanvas.height;
             let compositeCtx = compositeCanvas.getContext('2d');
             
-            // 魔法1：境界線のギザギザを消す「フェザリング（ぼかし）」
-            compositeCtx.filter = 'blur(20px)'; // なぞり跡のフチを柔らかくする
+            // マスクのフチを強烈にぼかして、絶対に境目がバレないようにする
+            compositeCtx.filter = 'blur(25px)'; 
             compositeCtx.drawImage(drawCanvas, 0, 0); 
-            compositeCtx.filter = 'none'; // リセット
+            compositeCtx.filter = 'none'; 
             
             compositeCtx.globalCompositeOperation = 'source-in'; 
 
-            // 魔法2：低コントラスト＆高ハイライトの「ふんわりフィルター」をかける！
-            // コントラストを下げ、明るさと彩度を上げて、透明感のある肌色を作る
-            compositeCtx.filter = 'contrast(85%) brightness(115%) saturate(105%)';
+            // ふんわり美肌フィルター（コントラスト低め、ハイライト高め）
+            compositeCtx.filter = 'contrast(90%) brightness(110%) saturate(105%)';
             compositeCtx.drawImage(smallCanvas, 0, 0, imageCanvas.width, imageCanvas.height); 
-            compositeCtx.filter = 'none'; // リセット
+            compositeCtx.filter = 'none';
+
+            // 🌟 魔法3：のっぺりした肌に「人工的な肌のキメ（ノイズ）」を植え付ける
+            let patternCanvas = document.createElement('canvas');
+            patternCanvas.width = 150; patternCanvas.height = 150;
+            let pCtx = patternCanvas.getContext('2d');
+            let pData = pCtx.createImageData(150, 150);
+            for (let i = 0; i < pData.data.length; i += 4) {
+                // グレーをベースに、微細なザラザラ感を作る
+                let noise = (Math.random() - 0.5) * 40; 
+                let val = 128 + noise;
+                pData.data[i] = val; pData.data[i+1] = val; pData.data[i+2] = val;
+                pData.data[i+3] = 255; 
+            }
+            pCtx.putImageData(pData, 0, 0);
+
+            // ノイズを「オーバーレイ」で重ねることで、プラスチック感が消え本物の肌に見える
+            compositeCtx.globalCompositeOperation = 'overlay';
+            compositeCtx.globalAlpha = 0.25; // ノイズの強さ
+            compositeCtx.fillStyle = compositeCtx.createPattern(patternCanvas, 'repeat');
+            compositeCtx.fillRect(0, 0, compositeCanvas.width, compositeCanvas.height);
 
             // --- 🌟 結果出力 ---
             let factor = parseInt(smoothFactor.value);
-            let alpha = factor / 100;
+            // 今回はテクスチャがあるので、強めに重ねても不自然になりません！
+            let alpha = 0.3 + (factor / 100 * 0.7); // 最小でも30%の厚塗りを保証
 
             resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
-            // 元の質感を敷く
+            resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.drawImage(currentImage, 0, 0); 
             
-            // ふんわりフィルター済みの肌を半透明で重ねる
-            resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.globalAlpha = alpha; 
             resultCtx.drawImage(compositeCanvas, 0, 0); 
             resultCtx.globalAlpha = 1.0; 
 
-            src.delete(); srcRgb.delete(); smoothedMat.delete(); 
+            src.delete(); srcRgb.delete(); medianMat.delete(); smoothedMat.delete(); 
             smoothedTempRgb.delete(); smoothedTempRgba.delete(); channels.delete(); r.delete(); b.delete();
 
             processBtn.textContent = "✨ なぞった部分を美肌にする ✨";
