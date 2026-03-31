@@ -222,7 +222,7 @@ drawCanvas.addEventListener('touchend', stopDrawing);
 drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js による美肌化と合成処理 (超軽量・ブラウザ拡大版)
+// 3. OpenCV.js による美肌化と合成処理 (スマホ完全適応・爆速コンシーラー版)
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) {
@@ -236,9 +236,9 @@ processBtn.addEventListener('click', function() {
     setTimeout(function() {
         try {
             // ---------------------------------------------------------
-            // 🚀 魔法1：OpenCVに渡す前に、ブラウザの機能で画像を小さくする
+            // 🚀 魔法1：計算用の画像をスマホに優しい「600px」に縮小
             // ---------------------------------------------------------
-            const MAX_SIZE = 800; // 計算用は最大800px（スマホのメモリに優しいサイズ）
+            const MAX_SIZE = 600; 
             let scale = 1.0;
             if (currentImage.width > MAX_SIZE || currentImage.height > MAX_SIZE) {
                 scale = MAX_SIZE / Math.max(currentImage.width, currentImage.height);
@@ -247,7 +247,6 @@ processBtn.addEventListener('click', function() {
             let smallW = Math.round(currentImage.width * scale);
             let smallH = Math.round(currentImage.height * scale);
             
-            // 小さいキャンバスを作って、そこに縮小して描画
             let smallCanvas = document.createElement('canvas');
             smallCanvas.width = smallW;
             smallCanvas.height = smallH;
@@ -255,7 +254,7 @@ processBtn.addEventListener('click', function() {
             smallCtx.drawImage(currentImage, 0, 0, smallW, smallH);
 
             // ---------------------------------------------------------
-            // 🌟 処理：OpenCVには「小さい画像」だけを処理させる（フリーズ回避）
+            // 🌟 処理：小さい画像に対して「お化粧」を施す
             // ---------------------------------------------------------
             let src = cv.imread(smallCanvas);
             let srcRgb = new cv.Mat();
@@ -263,20 +262,22 @@ processBtn.addEventListener('click', function() {
 
             let factor = parseInt(smoothFactor.value);
 
-            // 1. MedianBlur (コンシーラー効果)
+            // 1. メディアンフィルタ（ヒゲや肌荒れの凹凸を、周囲の肌色で強引に塗りつぶす）
             let medianMat = new cv.Mat();
-            let kMedian = Math.floor(factor / 100 * 4) * 2 + 3; 
+            let kMedian = Math.floor(factor / 100 * 3) * 2 + 3; // サイズを3〜9の奇数に制限
             if (factor > 5) {
                 cv.medianBlur(srcRgb, medianMat, kMedian);
             } else {
                 srcRgb.copyTo(medianMat);
             }
 
-            // 2. BilateralFilter (陶器肌効果)
+            // 2. バイラテラルフィルタ（塗りつぶした肌を滑らかな陶器肌にする）
             let smoothedMat = new cv.Mat();
-            let sigmaSpace = 10 + (40 * factor / 100);
-            let sigmaColor = 20 + (80 * factor / 100);
-            cv.bilateralFilter(medianMat, smoothedMat, -1, sigmaColor, sigmaSpace);
+            // 🚨 ここがフリーズの真犯人でした！計算範囲を「7」に固定して暴走をストップ！
+            let d = 7; 
+            let sigmaColor = 50 + (100 * factor / 100);
+            let sigmaSpace = 50 + (100 * factor / 100);
+            cv.bilateralFilter(medianMat, smoothedMat, d, sigmaColor, sigmaSpace);
 
             // 3. 色温度調整
             let channels = new cv.MatVector();
@@ -302,31 +303,28 @@ processBtn.addEventListener('click', function() {
             let smoothedTempRgba = new cv.Mat();
             cv.cvtColor(smoothedTempRgb, smoothedTempRgba, cv.COLOR_RGB2RGBA);
 
-            // OpenCVの結果を「小さいキャンバス」に書き出す
             cv.imshow(smallCanvas, smoothedTempRgba);
 
             // ---------------------------------------------------------
-            // 🚀 魔法2：ブラウザの標準機能で12MPに引き伸ばして合成（超高速）
+            // 🚀 魔法2：出来上がったコンシーラー肌を、元の巨大サイズに引き伸ばす
             // ---------------------------------------------------------
             let compositeCanvas = document.createElement('canvas');
-            compositeCanvas.width = imageCanvas.width;   // 元の12MPサイズ
-            compositeCanvas.height = imageCanvas.height; // 元の12MPサイズ
+            compositeCanvas.width = imageCanvas.width;
+            compositeCanvas.height = imageCanvas.height;
             let compositeCtx = compositeCanvas.getContext('2d');
             
-            // まず白いなぞり跡（マスク）を12MPサイズで置く
             compositeCtx.drawImage(drawCanvas, 0, 0); 
             compositeCtx.globalCompositeOperation = 'source-in'; 
-            
-            // ★小さい美肌画像を、12MPの巨大キャンバスいっぱいに引き伸ばして流し込む！
+            // 600pxの画像を、12MPの解像度いっぱいに引き伸ばして流し込む（これが強烈なボカシになる）
             compositeCtx.drawImage(smallCanvas, 0, 0, imageCanvas.width, imageCanvas.height); 
 
             // 結果プレビューエリアへの出力
             resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
-            resultCtx.drawImage(currentImage, 0, 0); // ベースは元の12MP高画質写真
+            resultCtx.drawImage(currentImage, 0, 0); 
             resultCtx.globalCompositeOperation = 'source-over';
-            resultCtx.drawImage(compositeCanvas, 0, 0); // 引き伸ばされた美肌パーツを重ねる
+            resultCtx.drawImage(compositeCanvas, 0, 0); 
 
-            // メモリ掃除（小さな行列しか使っていないので一瞬で終わる）
+            // お掃除（メモリ解放）
             src.delete(); srcRgb.delete(); medianMat.delete(); smoothedMat.delete(); 
             smoothedTempRgb.delete(); smoothedTempRgba.delete(); channels.delete(); r.delete(); b.delete();
 
