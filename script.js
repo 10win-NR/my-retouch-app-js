@@ -84,7 +84,7 @@ imageInput.addEventListener('change', function(e) {
 });
 
 // ==========================================
-// 2. お絵描き機能（ルーペの画面外はみ出し対応）
+// 2. お絵描き機能（ルーペの画面外はみ出し＆座標修正対応）
 // ==========================================
 let isDrawing = false;
 let lastX = 0; let lastY = 0; 
@@ -106,10 +106,11 @@ function getCoordinates(e) {
     const scaleX = drawCanvas.width / rect.width;
     const scaleY = drawCanvas.height / rect.height;
 
+    // 🌟 一部の環境で発生していた座標ズレを修正 (rect.left/rect.top の反映)
     return {
         x: (clientX - rect.left) * scaleX, 
         y: (clientY - rect.top) * scaleY,  
-        pageX: pageX, // 🌟 画面全体に対する絶対座標
+        pageX: pageX, 
         pageY: pageY
     };
 }
@@ -145,7 +146,6 @@ function draw(e) {
     drawCtx.stroke();
     lastX = pos.x; lastY = pos.y;
 
-    // 🌟 ルーペを画面の絶対座標で配置（キャンバス外でも切れない）
     loupeCanvas.style.left = (pos.pageX - LOUPE_SIZE / 2) + 'px';
     loupeCanvas.style.top = (pos.pageY - LOUPE_SIZE - 50) + 'px';
 
@@ -171,7 +171,7 @@ drawCanvas.addEventListener('touchstart', startDrawing, { passive: false }); dra
 drawCanvas.addEventListener('touchend', stopDrawing); drawCanvas.addEventListener('touchcancel', stopDrawing);
 
 // ==========================================
-// 3. OpenCV.js による美肌化と合成処理 (ナチュラル・レイヤー合成版)
+// 3. OpenCV.js による美肌化と合成処理 (超・ナチュラルお化粧レイヤー合成版)
 // ==========================================
 processBtn.addEventListener('click', function() {
     if (typeof cv === 'undefined' || !cv.Mat) { alert('⏳ 準備中です。'); return; }
@@ -181,8 +181,8 @@ processBtn.addEventListener('click', function() {
 
     setTimeout(function() {
         try {
-            // 計算用サイズ（少し大きめにして質感を残す）
-            const MAX_SIZE = 1000; 
+            // 計算用サイズ（質感を残すため、メモリ制限限界まで拡大）
+            const MAX_SIZE = 2500; 
             let scale = 1.0;
             if (currentImage.width > MAX_SIZE || currentImage.height > MAX_SIZE) {
                 scale = MAX_SIZE / Math.max(currentImage.width, currentImage.height);
@@ -200,12 +200,12 @@ processBtn.addEventListener('click', function() {
             let srcRgb = new cv.Mat();
             cv.cvtColor(src, srcRgb, cv.COLOR_RGBA2RGB);
 
-            // 🚨 塗り絵になるメディアンフィルタを廃止！
+            // 🚨 強すぎるメディアンを廃止し、バイラテラルを超弱設定に固定！
             let smoothedMat = new cv.Mat();
-            // 自然なボカシを固定で生成（後で透明度で強さを調整する）
-            let d = 5; 
-            let sigmaColor = 50;
-            let sigmaSpace = 50;
+            // 毛穴レベルの質感が残る超弱設定
+            let d = 3; 
+            let sigmaColor = 25;
+            let sigmaSpace = 25;
             cv.bilateralFilter(srcRgb, smoothedMat, d, sigmaColor, sigmaSpace);
 
             let channels = new cv.MatVector();
@@ -235,19 +235,19 @@ processBtn.addEventListener('click', function() {
             compositeCtx.globalCompositeOperation = 'source-in'; 
             compositeCtx.drawImage(smallCanvas, 0, 0, imageCanvas.width, imageCanvas.height); 
 
-            // 🌟 結果出力：ここが「ファンデーションの魔法」です
+            // 🌟 結果出力：不透明度ブレンドの魔法
             let factor = parseInt(smoothFactor.value);
-            let alpha = factor / 100; // スライダーの値を不透明度に変換 (10%なら 0.1)
+            let alpha = factor / 100; // スライダーが強さではなく透明度になる
 
             resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
             // 1. まず元の高画質（毛穴もヒゲもそのまま）を敷く
             resultCtx.drawImage(currentImage, 0, 0); 
             
-            // 2. その上に、美肌画像を「半透明」で重ねる！
+            // 2. その上に、超弱美肌画像を「半透明」で重ねる
             resultCtx.globalCompositeOperation = 'source-over';
             resultCtx.globalAlpha = alpha; 
             resultCtx.drawImage(compositeCanvas, 0, 0); 
-            resultCtx.globalAlpha = 1.0; // 戻す
+            resultCtx.globalAlpha = 1.0; 
 
             src.delete(); srcRgb.delete(); smoothedMat.delete(); 
             smoothedTempRgb.delete(); smoothedTempRgba.delete(); channels.delete(); r.delete(); b.delete();
@@ -265,20 +265,15 @@ processBtn.addEventListener('click', function() {
 });
 
 // ==========================================
-// 4. 画像の保存機能（🌟 スマホで落ちない高品質JPGに変更）
+// 4. 画像の保存機能（🌟 スマホで落ちない高品質JPG＆共有機能に変更）
 // ==========================================
 saveBtn.addEventListener('click', function() {
     if (!currentImage.src) { alert('まずは画像を読み込んでください！'); return; }
 
-    // 超巨大なPNGはスマホのメモリを破壊するため、高品質JPEG（0.95）で出力します
     resultCanvas.toBlob(function(blob) {
         if (!blob) { alert('画像の保存に失敗しました。'); return; }
 
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-
-        let fileName = "retouched_image.jpg"; // 拡張子をjpgに
+        let fileName = "retouched_image.jpg";
         if (imageInput.files.length > 0) {
             const originalName = imageInput.files[0].name;
             const dotIndex = originalName.lastIndexOf('.');
@@ -287,12 +282,28 @@ saveBtn.addEventListener('click', function() {
             }
         }
 
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click(); 
-
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // 🌟 魔法：Androidでも確実に保存できるよう「共有機能（Web Share）」を使う
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: "image/jpeg" })] })) {
+            const file = new File([blob], fileName, { type: "image/jpeg" });
+            navigator.share({
+                files: [file],
+                title: '補正した画像を保存',
+                text: '🕊️ 私だけの美肌アプリで作成しました'
+            })
+            .then(() => console.log('共有成功'))
+            .catch((error) => console.log('共有失敗', error));
+        } else {
+            // 共有が使えない場合のフォールバック（以前のBlobダウンロード）
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click(); 
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            alert('ダウンロードを開始しました（共有が使えない環境です）。保存ダイアログが閉じない場合は、ブラウザのダウンロード履歴を確認してください。');
+        }
         
-    }, 'image/jpeg', 0.95); // 🌟 これで12MPでもスマホで保存できるようになります！
+    }, 'image/jpeg', 0.95); // 12MPでもスマホで扱える高品質JPG
 });
