@@ -8,7 +8,7 @@
 <body style="font-family: sans-serif; background-color: #f0f2f6; padding: 15px; margin: 0;">
     
     <h2>🕊️ 私だけの美肌アプリ</h2>
-    <p style="color: #666; font-size: 0.85em;">※画像はサーバーに送信されず、端末内だけで安全に処理されます。</p>
+    <p style="color: #666; font-size: 0.85em;">※画像は端末内だけで安全に処理されます。</p>
 
     <div style="background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
         <input type="file" id="imageInput" accept="image/png, image/jpeg" style="width: 100%;">
@@ -30,7 +30,7 @@
         </label>
 
         <label style="display: block; margin-bottom: 10px;">ペンの太さ: <input type="range" id="brushSize" min="5" max="150" value="40" style="width: 100%;"></label>
-        <label style="display: block; margin-bottom: 10px;">美肌の強さ（透明度）: <input type="range" id="smoothFactor" min="0" max="100" value="30" style="width: 100%;"></label>
+        <label style="display: block; margin-bottom: 10px;">美肌の強さ（透明度）: <input type="range" id="smoothFactor" min="0" max="100" value="20" style="width: 100%;"></label>
         <label style="display: block; margin-bottom: 20px;">色温度（青←→赤）: <input type="range" id="colorTemp" min="-50" max="50" value="0" style="width: 100%;"></label>
 
         <button id="processBtn" style="display: block; width: 100%; padding: 15px; background: #ff4b4b; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 1.1em; cursor: pointer;">
@@ -59,7 +59,7 @@
     </div>
 
     <button id="saveBtn" style="display: block; width: 100%; padding: 15px; margin-top: 20px; margin-bottom: 40px; background: #28a745; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 1.1em; cursor: pointer;">
-        💾 補正した画像を保存する
+        💾 補正した画像を保存する (JPG)
     </button>
 
     <canvas id="loupeCanvas" style="position: absolute; display: none; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.5); pointer-events: none; z-index: 1000;"></canvas>
